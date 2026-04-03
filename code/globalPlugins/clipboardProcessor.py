@@ -1122,3 +1122,48 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         default_model = config.conf["clipboardProcessor"]["model"]
         parent = wx.GetApp().GetTopWindow()
         dialog = QuickPromptDialog(parent, default_model)
+        
+        if dialog.ShowModal() == wx.ID_OK:
+            user_prompt, selected_model = dialog.get_values()
+            self._start_background_task(
+                f"Processando prompt rápido com {selected_model}...",
+                self._quick_prompt_worker_thread,
+                user_prompt,
+                selected_model
+            )
+        
+        dialog.Destroy()
+
+    def script_processSelection(self, gesture):
+        selected_text = ""
+        try:
+            focus = api.getFocusObject()
+            selection = getattr(focus, "selection", None)
+            if selection:
+                selected_text = (selection.text or "").strip()
+        except Exception:
+            pass
+
+        if not selected_text:
+            tones.beep(200, 100)
+            ui.message("Nenhum texto selecionado.")
+            return
+
+        wx.CallAfter(
+            self._show_prompt_selection_menu,
+            lambda selected_prompt_name: self._start_text_processing(selected_text, selected_prompt_name)
+        )
+
+    def script_processClipboard(self, gesture):
+        try:
+            clipboard_payload = self._read_clipboard_payload()
+        except Exception as e:
+            ui.message(f"Não foi possível ler a área de transferência: {e}")
+            return
+        self._dispatch_clipboard_payload(clipboard_payload)
+
+    __gestures = {
+        "kb:NVDA+shift+p": "processSelection",
+        "kb:control+NVDA+shift+p": "processClipboard",
+        "kb:control+alt+shift+NVDA+p": "quickPrompt",
+    }
