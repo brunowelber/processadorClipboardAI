@@ -232,8 +232,6 @@ class QuickPromptDialog(wx.Dialog):
         promptLabel = wx.StaticText(self, label="Escreva seu prompt:")
         mainSizer.Add(promptLabel, flag=wx.ALL, border=5)
         self.promptCtrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
-        # Acessibilidade: Associar o rótulo ao campo
-        self.promptCtrl.SetLabel("Campo de edição do prompt")
         mainSizer.Add(self.promptCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
         
         modelSizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -245,7 +243,6 @@ class QuickPromptDialog(wx.Dialog):
             choices=MODEL_CHOICES,
             style=wx.CB_DROPDOWN # Permitir edição manual
         )
-        self.modelCtrl.SetLabel("Seleção de modelo de IA")
         modelSizer.Add(self.modelCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
         mainSizer.Add(modelSizer, flag=wx.EXPAND)
         
