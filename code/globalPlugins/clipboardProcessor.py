@@ -1118,7 +1118,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         
         dialog.Destroy()
 
-    def script_quickPrompt(self, gesture):
+    def _show_quick_prompt_dialog(self):
         default_model = config.conf["clipboardProcessor"]["model"]
         parent = wx.GetApp().GetTopWindow()
         dialog = QuickPromptDialog(parent, default_model)
@@ -1133,6 +1133,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
         
         dialog.Destroy()
+
+    def script_quickPrompt(self, gesture):
+        wx.CallAfter(self._show_quick_prompt_dialog)
 
     def script_processSelection(self, gesture):
         selected_text = ""
