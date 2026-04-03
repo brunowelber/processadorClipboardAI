@@ -232,17 +232,20 @@ class QuickPromptDialog(wx.Dialog):
         promptLabel = wx.StaticText(self, label="Escreva seu prompt:")
         mainSizer.Add(promptLabel, flag=wx.ALL, border=5)
         self.promptCtrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
+        # Acessibilidade: Associar o rótulo ao campo
+        self.promptCtrl.SetLabel("Campo de edição do prompt")
         mainSizer.Add(self.promptCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
         
         modelSizer = wx.BoxSizer(wx.HORIZONTAL)
-        modelLabel = wx.StaticText(self, label="Selecione o Modelo:")
+        modelLabel = wx.StaticText(self, label="Selecione ou digite o Modelo:")
         modelSizer.Add(modelLabel, flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
         self.modelCtrl = wx.ComboBox(
             self,
             value=default_model,
             choices=MODEL_CHOICES,
-            style=wx.CB_DROPDOWN | wx.CB_READONLY
+            style=wx.CB_DROPDOWN # Permitir edição manual
         )
+        self.modelCtrl.SetLabel("Seleção de modelo de IA")
         modelSizer.Add(self.modelCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
         mainSizer.Add(modelSizer, flag=wx.EXPAND)
         
@@ -266,7 +269,7 @@ class QuickPromptDialog(wx.Dialog):
         self.EndModal(wx.ID_OK)
 
     def get_values(self):
-        return self.promptCtrl.GetValue().strip(), self.modelCtrl.GetValue()
+        return self.promptCtrl.GetValue().strip(), self.modelCtrl.GetValue().strip()
 
 # --- Painel de Configurações Principal ---
 class SettingsPanel(settingsDialogs.SettingsPanel):
@@ -282,12 +285,12 @@ class SettingsPanel(settingsDialogs.SettingsPanel):
         apiKeySizer = wx.BoxSizer(wx.HORIZONTAL)
         apiKeyLabel = wx.StaticText(generalBox.GetStaticBox(), label="Chave da API:")
         apiKeySizer.Add(apiKeyLabel, flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
-        self.apiKeyCtrl = wx.TextCtrl(generalBox.GetStaticBox(), value=config.conf["clipboardProcessor"]["api_key"])
+        self.apiKeyCtrl = wx.TextCtrl(generalBox.GetStaticBox(), value=config.conf["clipboardProcessor"]["api_key"], style=wx.TE_PASSWORD)
         apiKeySizer.Add(self.apiKeyCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
         generalBox.Add(apiKeySizer, flag=wx.EXPAND)
 
         modelSizer = wx.BoxSizer(wx.HORIZONTAL)
-        modelLabel = wx.StaticText(generalBox.GetStaticBox(), label="Modelo para Texto e URL:")
+        modelLabel = wx.StaticText(generalBox.GetStaticBox(), label="Modelo para Texto e URL (selecione ou digite):")
         modelSizer.Add(modelLabel, flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
         self.modelCtrl = wx.ComboBox(
             generalBox.GetStaticBox(),
@@ -463,9 +466,9 @@ class SettingsPanel(settingsDialogs.SettingsPanel):
     def onSave(self):
         global prompts_collection
         config.conf["clipboardProcessor"]["api_key"] = self.apiKeyCtrl.GetValue()
-        config.conf["clipboardProcessor"]["model"] = self.modelCtrl.GetValue()
+        config.conf["clipboardProcessor"]["model"] = self.modelCtrl.GetValue().strip()
         config.conf["clipboardProcessor"]["selected_prompt"] = self.defaultPromptCtrl.GetValue()
-        config.conf["clipboardProcessor"]["image_model"] = self.imageModelCtrl.GetValue()
+        config.conf["clipboardProcessor"]["image_model"] = self.imageModelCtrl.GetValue().strip()
         config.conf["clipboardProcessor"]["image_prompt"] = self.imagePromptCtrl.GetValue().strip()
         
         save_prompts(self.edited_prompts)
@@ -478,6 +481,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def __init__(self, *args, **kwargs):
         super(GlobalPlugin, self).__init__(*args, **kwargs)
+        self.session = requests.Session() if requests else None
         if not config.conf["clipboardProcessor"]["api_key"]:
             env_key = os.environ.get('OPENAI_API_KEY')
             if env_key:
@@ -489,6 +493,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             settingsDialogs.NVDASettingsDialog.categoryClasses.remove(SettingsPanel)
         except ValueError:
             pass
+        if self.session:
+            self.session.close()
         super(GlobalPlugin, self).terminate(*args, **kwargs)
 
     def _get_prompt_entry(self, selected_prompt_name):
@@ -501,13 +507,28 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def _ensure_api_requirements(self):
         api_key = config.conf["clipboardProcessor"]["api_key"]
 
-        if not requests:
+        if not requests or not self.session:
             raise RuntimeError("Erro: A biblioteca 'requests' não foi encontrada.")
 
         if not api_key:
             raise RuntimeError("Por favor, configure sua chave da API da OpenAI.")
 
         return api_key
+
+    def _handle_api_error(self, response):
+        """Tratamento granular de erros da API OpenAI."""
+        if response.status_code == 401:
+            return "Chave de API inválida ou expirada. Verifique as configurações."
+        if response.status_code == 429:
+            return "Limite de cota atingido ou excesso de requisições. Tente novamente mais tarde."
+        if response.status_code >= 500:
+            return f"Erro no servidor da OpenAI ({response.status_code}). Tente novamente em instantes."
+        try:
+            err_data = response.json()
+            msg = err_data.get("error", {}).get("message", "Erro desconhecido na API.")
+            return f"Erro da API: {msg}"
+        except Exception:
+            return f"Erro na requisição: Código {response.status_code}"
 
     def _extract_chat_result_text(self, json_response):
         result_text = json_response["choices"][0]["message"]["content"]
@@ -540,13 +561,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 {"role": "user", "content": user_text},
             ],
         }
-        response = requests.post(
+        response = self.session.post(
             "https://api.openai.com/v1/chat/completions",
             headers=headers,
             json=payload,
             timeout=90
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(self._handle_api_error(response))
         return self._sanitize_markdown_output(self._extract_chat_result_text(response.json()))
 
     def _post_responses_api(self, model, instructions, input_content):
@@ -562,13 +584,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ],
             "instructions": instructions,
         }
-        response = requests.post(
+        response = self.session.post(
             "https://api.openai.com/v1/responses",
             headers=headers,
             json=payload,
             timeout=120
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(self._handle_api_error(response))
         return self._sanitize_markdown_output(self._extract_responses_result_text(response.json()))
 
     def _process_text_with_prompt(self, text_to_process, selected_prompt_name):
@@ -595,7 +618,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         except (KeyError, IndexError):
             wx.CallAfter(ui.message, "Erro: Resposta inesperada da API.")
         except Exception as e:
-            wx.CallAfter(ui.message, f"Ocorreu um erro desconhecido: {e}")
+            wx.CallAfter(ui.message, f"Ocorreu um erro inesperado: {e}")
 
     def _bitmap_to_png_data_url(self, bitmap):
         fd, temp_path = tempfile.mkstemp(suffix=".png")
@@ -706,14 +729,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 "model": DEFAULT_AUDIO_TRANSCRIPTION_MODEL,
                 "response_format": "diarized_json",
             }
-            response = requests.post(
+            response = self.session.post(
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers=headers,
                 files=files,
                 data=data,
                 timeout=180
             )
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(self._handle_api_error(response))
         return response.json()
 
     def _process_audio_transcription(self, payload):
@@ -725,13 +749,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         return final_text, payload.get("display") or "áudio"
 
     def _download_web_resource(self, url):
-        response = requests.get(
+        response = self.session.get(
             url,
-            headers={"User-Agent": "clipboardProcessor/1.0"},
+            headers={"User-Agent": "clipboardProcessor/1.1"},
             stream=True,
             timeout=30
         )
-        response.raise_for_status()
+        if not response.ok:
+            raise RuntimeError(f"Erro ao acessar a URL: Código {response.status_code}")
         content_type = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         chunks = []
         total_bytes = 0
@@ -1046,7 +1071,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             wx.CallAfter(self._update_clipboard, clean_text)
         except Exception as e:
-            wx.CallAfter(ui.message, f"Erro no prompt rápido: {e}")
+            wx.CallAfter(ui.message, str(e))
 
     def _start_image_processing(self, payload):
         self._start_background_task(
@@ -1097,48 +1122,3 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         default_model = config.conf["clipboardProcessor"]["model"]
         parent = wx.GetApp().GetTopWindow()
         dialog = QuickPromptDialog(parent, default_model)
-        
-        if dialog.ShowModal() == wx.ID_OK:
-            user_prompt, selected_model = dialog.get_values()
-            self._start_background_task(
-                f"Processando prompt rápido com {selected_model}...",
-                self._quick_prompt_worker_thread,
-                user_prompt,
-                selected_model
-            )
-        
-        dialog.Destroy()
-
-    def script_processSelection(self, gesture):
-        selected_text = ""
-        try:
-            focus = api.getFocusObject()
-            selection = getattr(focus, "selection", None)
-            if selection:
-                selected_text = (selection.text or "").strip()
-        except Exception:
-            pass
-
-        if not selected_text:
-            tones.beep(200, 100)
-            ui.message("Nenhum texto selecionado.")
-            return
-
-        wx.CallAfter(
-            self._show_prompt_selection_menu,
-            lambda selected_prompt_name: self._start_text_processing(selected_text, selected_prompt_name)
-        )
-
-    def script_processClipboard(self, gesture):
-        try:
-            clipboard_payload = self._read_clipboard_payload()
-        except Exception as e:
-            ui.message(f"Não foi possível ler a área de transferência: {e}")
-            return
-        self._dispatch_clipboard_payload(clipboard_payload)
-
-    __gestures = {
-        "kb:NVDA+shift+p": "processSelection",
-        "kb:control+NVDA+shift+p": "processClipboard",
-        "kb:control+alt+shift+NVDA+p": "quickPrompt",
-    }
