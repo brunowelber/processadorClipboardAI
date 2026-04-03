@@ -928,7 +928,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 wx.TheClipboard.SetData(wx.TextDataObject(text))
                 wx.TheClipboard.Close()
                 tones.beep(800, 100)
-                ui.message("Área de transferência atualizada pela IA.")
+                ui.message(text)
         except Exception as e:
             ui.message(f"Erro ao atualizar a área de transferência: {e}")
 
@@ -950,7 +950,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             clean_text, image_label = self._process_image_with_prompt(payload)
             wx.CallAfter(self._update_clipboard, clean_text)
-            wx.CallAfter(ui.message, f"Imagem processada: {image_label}.")
         except RuntimeError as e:
             wx.CallAfter(ui.message, str(e))
         except ValueError as e:
@@ -966,7 +965,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             clean_text, audio_label = self._process_audio_transcription(payload)
             wx.CallAfter(self._update_clipboard, clean_text)
-            wx.CallAfter(ui.message, f"Áudio processado: {audio_label}.")
         except RuntimeError as e:
             wx.CallAfter(ui.message, str(e))
         except ValueError as e:
@@ -982,7 +980,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             clean_text, page_label = self._process_web_url_with_prompt(payload, selected_prompt_name)
             wx.CallAfter(self._update_clipboard, clean_text)
-            wx.CallAfter(ui.message, f"URL processada: {page_label}.")
         except RuntimeError as e:
             wx.CallAfter(ui.message, str(e))
         except ValueError as e:
