@@ -222,6 +222,52 @@ class PromptDialog(wx.Dialog):
     def get_values(self):
         return self.nameCtrl.GetValue().strip(), self.promptCtrl.GetValue().strip()
 
+# --- Diálogo de Prompt Rápido ---
+class QuickPromptDialog(wx.Dialog):
+    def __init__(self, parent, default_model):
+        super(QuickPromptDialog, self).__init__(parent, title="Execução de Prompt Rápido", size=(500, 250))
+        
+        mainSizer = wx.BoxSizer(wx.VERTICAL)
+        
+        promptLabel = wx.StaticText(self, label="Escreva seu prompt:")
+        mainSizer.Add(promptLabel, flag=wx.ALL, border=5)
+        self.promptCtrl = wx.TextCtrl(self, style=wx.TE_MULTILINE)
+        mainSizer.Add(self.promptCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
+        
+        modelSizer = wx.BoxSizer(wx.HORIZONTAL)
+        modelLabel = wx.StaticText(self, label="Selecione o Modelo:")
+        modelSizer.Add(modelLabel, flag=wx.ALIGN_CENTER_VERTICAL | wx.ALL, border=5)
+        self.modelCtrl = wx.ComboBox(
+            self,
+            value=default_model,
+            choices=MODEL_CHOICES,
+            style=wx.CB_DROPDOWN | wx.CB_READONLY
+        )
+        modelSizer.Add(self.modelCtrl, proportion=1, flag=wx.EXPAND | wx.ALL, border=5)
+        mainSizer.Add(modelSizer, flag=wx.EXPAND)
+        
+        buttonSizer = wx.StdDialogButtonSizer()
+        processButton = wx.Button(self, wx.ID_OK, label="Processar")
+        cancelButton = wx.Button(self, wx.ID_CANCEL, label="Cancelar")
+        buttonSizer.AddButton(processButton)
+        buttonSizer.AddButton(cancelButton)
+        buttonSizer.Realize()
+        mainSizer.Add(buttonSizer, flag=wx.ALIGN_CENTER | wx.ALL, border=5)
+        
+        self.SetSizer(mainSizer)
+        self.promptCtrl.SetFocus()
+        
+        self.Bind(wx.EVT_BUTTON, self.on_process, id=wx.ID_OK)
+
+    def on_process(self, event):
+        if not self.promptCtrl.GetValue().strip():
+            wx.MessageBox("O prompt não pode estar vazio.", "Erro", wx.OK | wx.ICON_ERROR)
+            return
+        self.EndModal(wx.ID_OK)
+
+    def get_values(self):
+        return self.promptCtrl.GetValue().strip(), self.modelCtrl.GetValue()
+
 # --- Painel de Configurações Principal ---
 class SettingsPanel(settingsDialogs.SettingsPanel):
     title = "Processador de Clipboard com IA"
@@ -991,6 +1037,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         except Exception as e:
             wx.CallAfter(ui.message, f"Ocorreu um erro ao processar a URL: {e}")
 
+    def _quick_prompt_worker_thread(self, user_prompt, model):
+        try:
+            clean_text = self._post_chat_completions(
+                "Você é um assistente útil. Responda de forma direta e concisa ao prompt do usuário.",
+                user_prompt,
+                model
+            )
+            wx.CallAfter(self._update_clipboard, clean_text)
+        except Exception as e:
+            wx.CallAfter(ui.message, f"Erro no prompt rápido: {e}")
+
     def _start_image_processing(self, payload):
         self._start_background_task(
             "Processando imagem...",
@@ -1036,6 +1093,22 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         
         dialog.Destroy()
 
+    def script_quickPrompt(self, gesture):
+        default_model = config.conf["clipboardProcessor"]["model"]
+        parent = wx.GetApp().GetTopWindow()
+        dialog = QuickPromptDialog(parent, default_model)
+        
+        if dialog.ShowModal() == wx.ID_OK:
+            user_prompt, selected_model = dialog.get_values()
+            self._start_background_task(
+                f"Processando prompt rápido com {selected_model}...",
+                self._quick_prompt_worker_thread,
+                user_prompt,
+                selected_model
+            )
+        
+        dialog.Destroy()
+
     def script_processSelection(self, gesture):
         selected_text = ""
         try:
@@ -1067,4 +1140,5 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     __gestures = {
         "kb:NVDA+shift+p": "processSelection",
         "kb:control+NVDA+shift+p": "processClipboard",
+        "kb:control+alt+shift+NVDA+p": "quickPrompt",
     }
