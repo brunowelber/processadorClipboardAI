@@ -1037,19 +1037,24 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         dialog.Destroy()
 
     def script_processSelection(self, gesture):
+        selected_text = ""
         try:
             focus = api.getFocusObject()
-            selection = focus.selection
-            selected_text = selection.text
-            if not selected_text or not selected_text.strip():
-                ui.message("Nenhum texto selecionado.")
-                return
-            wx.CallAfter(
-                self._show_prompt_selection_menu,
-                lambda selected_prompt_name: self._start_text_processing(selected_text, selected_prompt_name)
-            )
-        except (AttributeError, TypeError):
+            selection = getattr(focus, "selection", None)
+            if selection:
+                selected_text = (selection.text or "").strip()
+        except Exception:
+            pass
+
+        if not selected_text:
+            tones.beep(200, 100)
             ui.message("Nenhum texto selecionado.")
+            return
+
+        wx.CallAfter(
+            self._show_prompt_selection_menu,
+            lambda selected_prompt_name: self._start_text_processing(selected_text, selected_prompt_name)
+        )
 
     def script_processClipboard(self, gesture):
         try:
